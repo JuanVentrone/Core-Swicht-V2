@@ -7,10 +7,11 @@ from fastapi import FastAPI
 
 from app.alarm_services import AlarmController
 from app.config import ModbusSettings
-from app.config_loader import load_alarm_devices, load_contactors
+from app.config_loader import load_alarm_devices, load_contactors, load_voltage_protection_settings
 from app.device_manager import DeviceManager
 from app.devices.industrial_multimeter import IndustrialMultimeterDevice
 from app.devices.relay_controller import RelayControllerDevice
+from app.voltage_protection import VoltageProtectionMonitor
 from app.schemas import (
     DevicesStatusResponse,
     HeartbeatResponse,
@@ -31,11 +32,17 @@ relay_device = RelayControllerDevice(
     webhook_token=os.getenv("WEBHOOK_TOKEN", ""),
 )
 multimeter_device = IndustrialMultimeterDevice(settings=ModbusSettings())
+voltage_protection = VoltageProtectionMonitor(
+    multimeter_device=multimeter_device,
+    controller=relay_device.controller,
+    settings=load_voltage_protection_settings(),
+)
 device_manager = DeviceManager(
     devices={
         "relay_controller": relay_device,
         "industrial_multimeter": multimeter_device,
-    }
+    },
+    startup_gate=voltage_protection.run_startup_gate,
 )
 alarm_controller = AlarmController(load_alarm_devices(), relay_device.controller)
 
@@ -43,9 +50,11 @@ alarm_controller = AlarmController(load_alarm_devices(), relay_device.controller
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     device_manager.initialize_all()
+    voltage_protection.start()
     try:
         yield
     finally:
+        voltage_protection.stop()
         device_manager.shutdown_all()
 
 
