@@ -33,7 +33,7 @@ relay_device = RelayControllerDevice(
 )
 multimeter_device = IndustrialMultimeterDevice(settings=ModbusSettings())
 voltage_protection = VoltageProtectionMonitor(
-    multimeter_device=multimeter_device,
+    multimeter=multimeter_device,
     controller=relay_device.controller,
     settings=load_voltage_protection_settings(),
 )

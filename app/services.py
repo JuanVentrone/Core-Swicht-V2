@@ -11,6 +11,7 @@ from urllib import error, request
 import tinytuya
 
 from app.models import Contactor
+from app.notifications import NotificationSettings, load_notification_settings, notify_contactor_change
 
 logger = logging.getLogger("farm-control")
 
@@ -21,10 +22,14 @@ class FarmController:
         contactors: dict[str, Contactor],
         webhook_url: str = "",
         webhook_token: str = "",
+        notification_settings: NotificationSettings | None = None,
     ) -> None:
         self.contactors = contactors
         self.webhook_url = webhook_url.strip()
         self.webhook_token = webhook_token.strip()
+        self._notification_settings = (
+            notification_settings or load_notification_settings()
+        )
         self._thread_lock = threading.Lock()
         self._switch_thread: threading.Thread | None = None
 
@@ -130,9 +135,12 @@ class FarmController:
             try:
                 if result is not None:
                     self._emit_webhook_event(contactor_key, result)
+                    notify_contactor_change(
+                        contactor_key, result, self._notification_settings
+                    )
             except Exception as webhook_exc:
                 logger.warning(
-                    "Webhook dispatch setup failed for %s: %s",
+                    "Webhook/notification dispatch failed for %s: %s",
                     contactor_obj.name,
                     webhook_exc,
                 )

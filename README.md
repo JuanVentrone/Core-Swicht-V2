@@ -70,6 +70,43 @@ Respuesta de `GET /metrics/power` (si hay datos):
 }
 ```
 
+## Notificaciones al celular (contactores)
+
+Cuando **C1, C2 o C3** cambian de estado (desde el panel Pain Farm, la API o el encendido secuencial), la API puede enviar un aviso al móvil.
+
+### Opción A — ntfy (recomendada, app gratuita)
+
+1. Instala **[ntfy](https://ntfy.sh/)** en iOS o Android.
+2. En la app, suscríbete a un tema privado, por ejemplo `pain-farm-tugranja` (elige un nombre difícil de adivinar).
+3. En el servidor donde corre Core Swicht:
+
+```bash
+export NTFY_TOPIC="pain-farm-tugranja"
+# Servidor público por defecto; o tu instancia propia:
+# export NTFY_SERVER="https://ntfy.sh"
+```
+
+4. Reinicia la API (`systemctl --user restart core-swicht` o `uvicorn`).
+
+Cada conmutación envía título y mensaje, por ejemplo: `Contactor C1 · ENCENDIDO`.
+
+### Opción B — Telegram
+
+1. Crea un bot con [@BotFather](https://t.me/BotFather) y copia el **token**.
+2. Obtén tu **chat_id** (mensaje al bot + `https://api.telegram.org/bot<TOKEN>/getUpdates`).
+3. Variables:
+
+```bash
+export TELEGRAM_BOT_TOKEN="123456:ABC..."
+export TELEGRAM_CHAT_ID="123456789"
+```
+
+Puedes usar **ntfy y Telegram a la vez**.
+
+Plantilla de variables: `.env.example`.
+
+---
+
 ## Webhook (plug-and-play)
 
 El webhook es opcional y queda desactivado por defecto.
