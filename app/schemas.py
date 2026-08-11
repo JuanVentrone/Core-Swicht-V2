@@ -35,6 +35,7 @@ class PowerMetricsResponse(BaseModel):
     status: str
     data: PowerMetricsData | None
     error: str | None = None
+    shutdown_reason: str | None = None
 
 
 class TemperatureMetricsData(BaseModel):
@@ -48,6 +49,7 @@ class TemperatureMetricsResponse(BaseModel):
     status: str
     data: TemperatureMetricsData | None
     error: str | None = None
+    shutdown_reason: str | None = None
 
 
 class HeartbeatResponse(BaseModel):
@@ -55,3 +57,5 @@ class HeartbeatResponse(BaseModel):
     uptime_seconds: float
     rs485_status: str
     temperature_rs485_status: str | None = None
+    manual_shutdown: bool = False
+    shutdown_reason: str | None = None

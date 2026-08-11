@@ -35,6 +35,7 @@ class VoltageProtectionMonitor:
         self._tripped = False
         self._temperature_tripped = False
         self._stable_since: float | None = None
+        self._last_trip_reason: str | None = None
 
     def run_startup_gate(self) -> None:
         """Tras iniciar solo el medidor: exige primer snapshot; si voltaje fuera de rango → apagado."""
@@ -53,6 +54,10 @@ class VoltageProtectionMonitor:
 
             if voltage_ready and temperature_ready:
                 if self._settings.enabled and voltage_snap is not None and self._any_line_trip(voltage_snap):
+                    self._last_trip_reason = (
+                        f"Voltage out of range: L1={voltage_snap.v_l1:.1f}, "
+                        f"L2={voltage_snap.v_l2:.1f}, L3={voltage_snap.v_l3:.1f}"
+                    )
                     logger.error(
                         "Arranque: voltaje fuera de rango permitido (%.1f–%.1f V): "
                         "L1=%.1f L2=%.1f L3=%.1f → apagado general",
@@ -62,17 +67,36 @@ class VoltageProtectionMonitor:
                         voltage_snap.v_l2,
                         voltage_snap.v_l3,
                     )
-                    self._controller.General_Switch_System(False)
+                    self._controller.General_Switch_System(
+                        False,
+                        manual=False,
+                        reason=(
+                            f"Voltage startup failure: "
+                            f"L1={voltage_snap.v_l1:.1f}, "
+                            f"L2={voltage_snap.v_l2:.1f}, "
+                            f"L3={voltage_snap.v_l3:.1f}"
+                        ),
+                    )
                     return
 
                 if self._temperature_settings.enabled and temperature_snap is not None:
                     if self._is_temperature_trip(temperature_snap):
+                        self._last_trip_reason = (
+                            f"Temperature out of range: {temperature_snap.temperature_c:.1f} °C"
+                        )
                         logger.error(
                             "Arranque: temperatura excede el máximo permitido (%.1f °C): %.1f °C → apagado general",
                             self._temperature_settings.max_temperature_c,
                             temperature_snap.temperature_c,
                         )
-                        self._controller.General_Switch_System(False)
+                        self._controller.General_Switch_System(
+                            False,
+                            manual=False,
+                            reason=(
+                                f"Temperature startup failure: "
+                                f"{temperature_snap.temperature_c:.1f} °C"
+                            ),
+                        )
                         return
 
                 if self._settings.enabled and voltage_snap is not None:
@@ -149,6 +173,11 @@ class VoltageProtectionMonitor:
         return all(lo <= v <= hi for v in (snap.v_l1, snap.v_l2, snap.v_l3))
 
     def _maybe_auto_start(self, snapshot: MultimeterSnapshot) -> None:
+        if self._controller.manual_shutdown:
+            self._stable_since = None
+            logger.debug("Auto-arranque omitido: apagado manual activo")
+            return
+
         if not self._settings.auto_start_enabled:
             self._stable_since = None
             return
@@ -251,8 +280,9 @@ class VoltageProtectionMonitor:
                     )
             elif temperature_trip:
                 self._stable_since = None
+                temperature = temperature_snapshot.temperature_c if temperature_snapshot is not None else float('nan')
+                self._last_trip_reason = f"Temperature out of range: {temperature:.1f} °C"
                 if not self._temperature_tripped:
-                    temperature = temperature_snapshot.temperature_c if temperature_snapshot is not None else float('nan')
                     self._log_temperature_trip(temperature)
                     result = self._controller.General_Switch_System(False)
                     logger.warning("Protección temperatura: apagado ejecutado: %s", result)

@@ -89,6 +89,8 @@ def heartbeat() -> HeartbeatResponse:
         "uptime_seconds": round(time.monotonic() - app_started_at, 2),
         "rs485_status": multimeter_device.health.value,
         "temperature_rs485_status": temperature_sensor_device.health.value,
+        "manual_shutdown": controller.manual_shutdown,
+        "shutdown_reason": controller.shutdown_reason,
     }
 
 
@@ -106,18 +108,20 @@ def power_metrics() -> PowerMetricsResponse:
             "status": "Offline",
             "data": None,
             "error": multimeter_device.last_error or "No multimeter data available yet",
+            "shutdown_reason": controller.shutdown_reason,
         }
     return {
         "success": True,
         "status": multimeter_device.health.value,
         "data": PowerMetricsData(**snapshot.__dict__),
         "error": None,
+        "shutdown_reason": controller.shutdown_reason,
     }
 
 
 @app.post("/switch/general")
 def switch_general(payload: SwitchRequest) -> dict:
-    return controller.General_Switch_System(payload.estado)
+    return controller.General_Switch_System(payload.estado, manual=not payload.estado)
 
 
 @app.post("/switch/C1")
@@ -158,12 +162,16 @@ def switch_luces(payload: SwitchRequest) -> dict:
 def status_general() -> dict:
     status = controller.General_Status()
     snapshot = multimeter_device.last_snapshot
-    status["temperature"] = {
-        "temperature_c": snapshot.temperature_c if snapshot is not None else None,
-        "source": snapshot.source if snapshot is not None else None,
-        "timestamp": snapshot.timestamp if snapshot is not None else None,
+    return {
+        "contactors": status,
+        "temperature": {
+            "temperature_c": snapshot.temperature_c if snapshot is not None else None,
+            "source": snapshot.source if snapshot is not None else None,
+            "timestamp": snapshot.timestamp if snapshot is not None else None,
+        },
+        "manual_shutdown": controller.manual_shutdown,
+        "shutdown_reason": controller.shutdown_reason,
     }
-    return status
 
 
 @app.get("/metrics/temperature", response_model=TemperatureMetricsResponse)
@@ -175,6 +183,7 @@ def temperature_metrics() -> TemperatureMetricsResponse:
             "status": "Offline",
             "data": None,
             "error": multimeter_device.last_error or "No multimeter data available yet",
+            "shutdown_reason": controller.shutdown_reason,
         }
     return {
         "success": True,
@@ -185,4 +194,5 @@ def temperature_metrics() -> TemperatureMetricsResponse:
             "source": snapshot.source,
         },
         "error": None,
+        "shutdown_reason": controller.shutdown_reason,
     }

@@ -32,12 +32,30 @@ class FarmController:
         )
         self._thread_lock = threading.Lock()
         self._switch_thread: threading.Thread | None = None
+        self._manual_shutdown = False
+        self._shutdown_reason: str | None = None
 
     def _get_contactor_key(self, contactor_obj: Contactor) -> str:
         for key, value in self.contactors.items():
             if value is contactor_obj:
                 return key
         return contactor_obj.name
+
+    @property
+    def manual_shutdown(self) -> bool:
+        return self._manual_shutdown
+
+    @property
+    def shutdown_reason(self) -> str | None:
+        return self._shutdown_reason
+
+    def _set_manual_shutdown(self, reason: str | None = None) -> None:
+        self._manual_shutdown = True
+        self._shutdown_reason = reason or "Manual general shutdown"
+
+    def _clear_manual_shutdown(self) -> None:
+        self._manual_shutdown = False
+        self._shutdown_reason = None
 
     def _emit_webhook_event(self, contactor_key: str, result: dict) -> None:
         if not self.webhook_url:
@@ -121,6 +139,8 @@ class FarmController:
                 "requested_state": estado,
                 "device_response": response,
             }
+            if estado and result["success"]:
+                self._clear_manual_shutdown()
             return result
         except Exception as exc:  # broad by design for network/device errors
             logger.exception("Error switching contactor %s: %s", contactor_obj.name, exc)
@@ -168,8 +188,14 @@ class FarmController:
                 time.sleep(180)
         logger.info("Sequential ON routine finished")
 
-    def General_Switch_System(self, estado: bool) -> dict:
+    def General_Switch_System(
+        self,
+        estado: bool,
+        manual: bool = False,
+        reason: str | None = None,
+    ) -> dict:
         if estado:
+            self._clear_manual_shutdown()
             with self._thread_lock:
                 if self._switch_thread and self._switch_thread.is_alive():
                     return {
@@ -186,7 +212,14 @@ class FarmController:
             return {
                 "accepted": True,
                 "message": "Sequential ON routine started in background",
+                "manual_shutdown_cleared": True,
             }
+
+        if manual:
+            self._set_manual_shutdown(reason or "Manual general shutdown")
+        else:
+            self._shutdown_reason = reason or "General OFF executed by controller"
+        shutdown_reason = self._shutdown_reason
 
         results = {}
         for key in ("C1", "C2", "C3"):
@@ -195,7 +228,12 @@ class FarmController:
                 results[key] = {"success": False, "error": "Not configured"}
                 continue
             results[key] = self.ctr_contactor(contactor, False)
-        return {"accepted": True, "message": "Immediate OFF executed", "results": results}
+        return {
+            "accepted": True,
+            "message": "Immediate OFF executed",
+            "results": results,
+            "shutdown_reason": shutdown_reason,
+        }
 
     def General_Status(self) -> dict:
         status_map = {}
