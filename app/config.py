@@ -23,12 +23,27 @@ class VoltageProtectionSettings:
 
 @dataclass(frozen=True)
 class ModbusSettings:
-    port: str = os.getenv("RS485_PORT", "/dev/ttyUSB0")
-    slave_address: int = int(os.getenv("MODBUS_SLAVE_ADDRESS", "1"))
-    baudrate: int = int(os.getenv("MODBUS_BAUDRATE", "9600"))
-    bytesize: int = int(os.getenv("MODBUS_BYTESIZE", "8"))
-    stopbits: int = int(os.getenv("MODBUS_STOPBITS", "1"))
-    parity: str = os.getenv("MODBUS_PARITY", "N")
-    timeout: float = float(os.getenv("MODBUS_TIMEOUT", "1.0"))
-    poll_interval_seconds: float = float(os.getenv("MODBUS_POLL_INTERVAL_SECONDS", "1.0"))
-    reconnect_delay_seconds: float = float(os.getenv("MODBUS_RECONNECT_DELAY_SECONDS", "3.0"))
+    port: str = "/dev/ttyUSB0"
+    slave_address: int = 1
+    baudrate: int = 9600
+    bytesize: int = 8
+    stopbits: int = 1
+    parity: str = "N"
+    timeout: float = 1.0
+    poll_interval_seconds: float = 1.0
+    reconnect_delay_seconds: float = 3.0
+
+
+@dataclass(frozen=True)
+class TemperatureModbusSettings(ModbusSettings):
+    temperature_register: int = 0
+    temperature_decimals: int = 1
+
+
+@dataclass(frozen=True)
+class TemperatureProtectionSettings:
+    """Umbrales para apagado por temperatura alta (ver config/config.ini)."""
+
+    enabled: bool
+    max_temperature_c: float
+    check_interval_seconds: float

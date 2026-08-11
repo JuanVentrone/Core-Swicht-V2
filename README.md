@@ -22,6 +22,13 @@ pip install -r requirements.txt
 
 Edita `config/C1.ini`, `config/C2.ini`, `config/C3.ini` con `id`, `ip` y `key` reales.
 
+El puerto RS485 para el medidor de voltaje y el sensor de temperatura se configura también en `config/config.ini` con secciones separadas:
+
+- `[MODBUS_VOLTAGE]` para el medidor de voltaje / potencia
+- `[MODBUS_TEMPERATURE]` para el sensor de temperatura independiente
+
+Esto facilita cambiar cada ruta sin tocar el código.
+
 ## Ejecutar API
 
 ```bash
@@ -32,6 +39,7 @@ uvicorn main:app --host 0.0.0.0 --port 8000
 
 - `GET /health`
 - `GET /metrics/power` (lectura RS485 en segundo plano cada 1 segundo)
+- `GET /metrics/temperature` (temperatura Modbus)
 - `POST /switch/general` con body JSON:
 
 ```json
@@ -132,6 +140,11 @@ uvicorn main:app --host 0.0.0.0 --port 8000
   - espera 180 segundos
   - enciende `C3`
   - se ejecuta en segundo plano (thread) para no bloquear la API
+
+## Protección por temperatura
+
+- Si la temperatura medida por RS485 excede `max_temperature_c`, el sistema apaga `C1`, `C2` y `C3` como prevención.
+- La temperatura se expone en `GET /metrics/temperature` y también se incluye en `GET /status/general`.
 
 - `estado=false`:
   - apaga `C1`, `C2`, `C3` de forma inmediata

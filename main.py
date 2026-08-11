@@ -7,10 +7,18 @@ from fastapi import FastAPI
 
 from app.alarm_services import AlarmController
 from app.config import ModbusSettings
-from app.config_loader import load_alarm_devices, load_contactors, load_voltage_protection_settings
+from app.config_loader import (
+    load_alarm_devices,
+    load_contactors,
+    load_modbus_settings,
+    load_temperature_modbus_settings,
+    load_temperature_protection_settings,
+    load_voltage_protection_settings,
+)
 from app.device_manager import DeviceManager
 from app.devices.industrial_multimeter import IndustrialMultimeterDevice
 from app.devices.relay_controller import RelayControllerDevice
+from app.devices.temperature_sensor import TemperatureSensorDevice
 from app.voltage_protection import VoltageProtectionMonitor
 from app.schemas import (
     DevicesStatusResponse,
@@ -18,6 +26,7 @@ from app.schemas import (
     PowerMetricsData,
     PowerMetricsResponse,
     SwitchRequest,
+    TemperatureMetricsResponse,
 )
 
 logging.basicConfig(
@@ -31,16 +40,22 @@ relay_device = RelayControllerDevice(
     webhook_url=os.getenv("WEBHOOK_URL", ""),
     webhook_token=os.getenv("WEBHOOK_TOKEN", ""),
 )
-multimeter_device = IndustrialMultimeterDevice(settings=ModbusSettings())
+voltage_modbus_settings = load_modbus_settings()
+multimeter_device = IndustrialMultimeterDevice(settings=voltage_modbus_settings)
+temperature_modbus_settings = load_temperature_modbus_settings()
+temperature_sensor_device = TemperatureSensorDevice(settings=temperature_modbus_settings)
+temperature_protection_settings = load_temperature_protection_settings()
 voltage_protection = VoltageProtectionMonitor(
     multimeter=multimeter_device,
     controller=relay_device.controller,
     settings=load_voltage_protection_settings(),
+    temperature_settings=temperature_protection_settings,
 )
 device_manager = DeviceManager(
     devices={
         "relay_controller": relay_device,
         "industrial_multimeter": multimeter_device,
+        "temperature_sensor": temperature_sensor_device,
     },
     startup_gate=voltage_protection.run_startup_gate,
 )
@@ -73,6 +88,7 @@ def heartbeat() -> HeartbeatResponse:
         "status": "alive",
         "uptime_seconds": round(time.monotonic() - app_started_at, 2),
         "rs485_status": multimeter_device.health.value,
+        "temperature_rs485_status": temperature_sensor_device.health.value,
     }
 
 
@@ -140,4 +156,33 @@ def switch_luces(payload: SwitchRequest) -> dict:
 
 @app.get("/status/general")
 def status_general() -> dict:
-    return controller.General_Status()
+    status = controller.General_Status()
+    snapshot = multimeter_device.last_snapshot
+    status["temperature"] = {
+        "temperature_c": snapshot.temperature_c if snapshot is not None else None,
+        "source": snapshot.source if snapshot is not None else None,
+        "timestamp": snapshot.timestamp if snapshot is not None else None,
+    }
+    return status
+
+
+@app.get("/metrics/temperature", response_model=TemperatureMetricsResponse)
+def temperature_metrics() -> TemperatureMetricsResponse:
+    snapshot = multimeter_device.last_snapshot
+    if snapshot is None:
+        return {
+            "success": False,
+            "status": "Offline",
+            "data": None,
+            "error": multimeter_device.last_error or "No multimeter data available yet",
+        }
+    return {
+        "success": True,
+        "status": multimeter_device.health.value,
+        "data": {
+            "temperature_c": snapshot.temperature_c,
+            "timestamp": snapshot.timestamp,
+            "source": snapshot.source,
+        },
+        "error": None,
+    }

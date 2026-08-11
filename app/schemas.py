@@ -37,7 +37,21 @@ class PowerMetricsResponse(BaseModel):
     error: str | None = None
 
 
+class TemperatureMetricsData(BaseModel):
+    temperature_c: float | None
+    timestamp: str | None = None
+    source: str | None = None
+
+
+class TemperatureMetricsResponse(BaseModel):
+    success: bool
+    status: str
+    data: TemperatureMetricsData | None
+    error: str | None = None
+
+
 class HeartbeatResponse(BaseModel):
     status: str
     uptime_seconds: float
     rs485_status: str
+    temperature_rs485_status: str | None = None

@@ -1,7 +1,12 @@
 from configparser import ConfigParser
 from pathlib import Path
 
-from app.config import VoltageProtectionSettings
+from app.config import (
+    ModbusSettings,
+    TemperatureModbusSettings,
+    TemperatureProtectionSettings,
+    VoltageProtectionSettings,
+)
 from app.models import Contactor
 
 
@@ -100,5 +105,112 @@ def load_voltage_protection_settings(
         auto_start_stable_seconds=sec.getfloat(
             "auto_start_stable_seconds",
             fallback=default.auto_start_stable_seconds,
+        ),
+    )
+
+
+def load_modbus_settings(
+    config_dir: Path = CONFIG_DIR,
+    section: str = "MODBUS_VOLTAGE",
+    default_port: str = "/dev/ttyUSB0",
+) -> ModbusSettings:
+    path = config_dir / "config.ini"
+    settings = ModbusSettings(port=default_port)
+    if not path.is_file():
+        return settings
+
+    parser = ConfigParser()
+    parser.read(path, encoding="utf-8")
+    if section not in parser:
+        return settings
+
+    sec = parser[section]
+    return ModbusSettings(
+        port=sec.get("port", fallback=default_port),
+        slave_address=sec.getint("slave_address", fallback=settings.slave_address),
+        baudrate=sec.getint("baudrate", fallback=settings.baudrate),
+        bytesize=sec.getint("bytesize", fallback=settings.bytesize),
+        stopbits=sec.getint("stopbits", fallback=settings.stopbits),
+        parity=sec.get("parity", fallback=settings.parity),
+        timeout=sec.getfloat("timeout", fallback=settings.timeout),
+        poll_interval_seconds=sec.getfloat(
+            "poll_interval_seconds",
+            fallback=settings.poll_interval_seconds,
+        ),
+        reconnect_delay_seconds=sec.getfloat(
+            "reconnect_delay_seconds",
+            fallback=settings.reconnect_delay_seconds,
+        ),
+    )
+
+
+def load_temperature_modbus_settings(
+    config_dir: Path = CONFIG_DIR,
+    section: str = "MODBUS_TEMPERATURE",
+    default_port: str = "/dev/ttyUSB1",
+) -> TemperatureModbusSettings:
+    path = config_dir / "config.ini"
+    default = TemperatureModbusSettings(port=default_port)
+    if not path.is_file():
+        return default
+
+    parser = ConfigParser()
+    parser.read(path, encoding="utf-8")
+    if section not in parser:
+        return default
+
+    sec = parser[section]
+    return TemperatureModbusSettings(
+        port=sec.get("port", fallback=default.port),
+        slave_address=sec.getint("slave_address", fallback=default.slave_address),
+        baudrate=sec.getint("baudrate", fallback=default.baudrate),
+        bytesize=sec.getint("bytesize", fallback=default.bytesize),
+        stopbits=sec.getint("stopbits", fallback=default.stopbits),
+        parity=sec.get("parity", fallback=default.parity),
+        timeout=sec.getfloat("timeout", fallback=default.timeout),
+        poll_interval_seconds=sec.getfloat(
+            "poll_interval_seconds",
+            fallback=default.poll_interval_seconds,
+        ),
+        reconnect_delay_seconds=sec.getfloat(
+            "reconnect_delay_seconds",
+            fallback=default.reconnect_delay_seconds,
+        ),
+        temperature_register=sec.getint(
+            "temperature_register",
+            fallback=default.temperature_register,
+        ),
+        temperature_decimals=sec.getint(
+            "temperature_decimals",
+            fallback=default.temperature_decimals,
+        ),
+    )
+
+
+def load_temperature_protection_settings(
+    config_dir: Path = CONFIG_DIR,
+) -> TemperatureProtectionSettings:
+    """Lee config/config.ini sección [TEMPERATURE_PROTECTION]."""
+    path = config_dir / "config.ini"
+    default = TemperatureProtectionSettings(
+        enabled=False,
+        max_temperature_c=80.0,
+        check_interval_seconds=4.0,
+    )
+    if not path.is_file():
+        return default
+
+    parser = ConfigParser()
+    parser.read(path, encoding="utf-8")
+    if "TEMPERATURE_PROTECTION" not in parser:
+        return default
+
+    sec = parser["TEMPERATURE_PROTECTION"]
+    return TemperatureProtectionSettings(
+        enabled=sec.getboolean("enabled", fallback=False),
+        max_temperature_c=sec.getfloat("max_temperature_c", fallback=default.max_temperature_c),
+        check_interval_seconds=sec.getfloat(
+            "check_interval_seconds",
+            fallback=default.check_interval_seconds,
         ),
     )
