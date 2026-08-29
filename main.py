@@ -47,6 +47,7 @@ temperature_sensor_device = TemperatureSensorDevice(settings=temperature_modbus_
 temperature_protection_settings = load_temperature_protection_settings()
 voltage_protection = VoltageProtectionMonitor(
     multimeter=multimeter_device,
+    temperature_sensor=temperature_sensor_device,
     controller=relay_device.controller,
     settings=load_voltage_protection_settings(),
     temperature_settings=temperature_protection_settings,
