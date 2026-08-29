@@ -35,9 +35,18 @@ class ModbusSettings:
 
 
 @dataclass(frozen=True)
+class TemperatureChannelConfig:
+    name: str = "Canal 1"
+    register: int = 0
+    decimals: int = 1
+    enabled: bool = True
+
+
+@dataclass(frozen=True)
 class TemperatureModbusSettings(ModbusSettings):
     temperature_register: int = 0
     temperature_decimals: int = 1
+    channels: list[TemperatureChannelConfig] | None = None
 
 
 @dataclass(frozen=True)

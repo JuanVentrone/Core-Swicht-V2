@@ -40,6 +40,8 @@ class PowerMetricsResponse(BaseModel):
 
 class TemperatureMetricsData(BaseModel):
     temperature_c: float | None
+    ambient_temperature_c: float | None = None
+    channels: dict[str, float] | None = None
     timestamp: str | None = None
     source: str | None = None
 

@@ -3,6 +3,7 @@ from pathlib import Path
 
 from app.config import (
     ModbusSettings,
+    TemperatureChannelConfig,
     TemperatureModbusSettings,
     TemperatureProtectionSettings,
     VoltageProtectionSettings,
@@ -113,8 +114,12 @@ def load_modbus_settings(
     config_dir: Path = CONFIG_DIR,
     section: str = "MODBUS_VOLTAGE",
     default_port: str = "/dev/ttyUSB0",
+    config_filename: str = "modbus_voltage.ini",
 ) -> ModbusSettings:
-    path = config_dir / "config.ini"
+    path = config_dir / config_filename
+    if not path.is_file():
+        legacy_path = config_dir / "config.ini"
+        path = legacy_path if legacy_path.is_file() else path
     settings = ModbusSettings(port=default_port)
     if not path.is_file():
         return settings
@@ -144,22 +149,93 @@ def load_modbus_settings(
     )
 
 
+def _default_temperature_channels() -> list[TemperatureChannelConfig]:
+    return [
+        TemperatureChannelConfig(name="Transformador", register=0, decimals=1, enabled=True),
+        TemperatureChannelConfig(name="Ambiente", register=1, decimals=1, enabled=True),
+        TemperatureChannelConfig(name="Canal 3", register=2, decimals=1, enabled=False),
+        TemperatureChannelConfig(name="Canal 4", register=3, decimals=1, enabled=False),
+    ]
+
+
+def _load_temperature_channels(parser: ConfigParser) -> list[TemperatureChannelConfig]:
+    default_channels = _default_temperature_channels()
+    channels: list[TemperatureChannelConfig] = []
+
+    for index in range(1, 5):
+        section_name = f"CHANNEL_{index}"
+        if section_name not in parser:
+            if index <= len(default_channels):
+                channels.append(default_channels[index - 1])
+            continue
+
+        sec = parser[section_name]
+        enabled = sec.getboolean("enabled", fallback=True)
+        if not enabled:
+            channels.append(
+                TemperatureChannelConfig(
+                    name=sec.get("name", fallback=f"Canal {index}"),
+                    register=sec.getint("register", fallback=(index - 1)),
+                    decimals=sec.getint("decimals", fallback=1),
+                    enabled=False,
+                )
+            )
+            continue
+
+        channels.append(
+            TemperatureChannelConfig(
+                name=sec.get("name", fallback=f"Canal {index}"),
+                register=sec.getint("register", fallback=(index - 1)),
+                decimals=sec.getint("decimals", fallback=1),
+                enabled=True,
+            )
+        )
+
+    if channels:
+        return channels
+    return default_channels
+
+
 def load_temperature_modbus_settings(
     config_dir: Path = CONFIG_DIR,
     section: str = "MODBUS_TEMPERATURE",
     default_port: str = "/dev/ttyUSB1",
+    config_filename: str = "modbus_temperature.ini",
 ) -> TemperatureModbusSettings:
-    path = config_dir / "config.ini"
+    path = config_dir / config_filename
+    if not path.is_file():
+        legacy_path = config_dir / "config.ini"
+        path = legacy_path if legacy_path.is_file() else path
     default = TemperatureModbusSettings(port=default_port)
     if not path.is_file():
-        return default
+        return TemperatureModbusSettings(
+            port=default_port,
+            channels=_default_temperature_channels(),
+        )
 
     parser = ConfigParser()
     parser.read(path, encoding="utf-8")
     if section not in parser:
-        return default
+        return TemperatureModbusSettings(
+            port=default_port,
+            channels=_default_temperature_channels(),
+        )
 
     sec = parser[section]
+    legacy_register = sec.getint("temperature_register", fallback=default.temperature_register)
+    legacy_decimals = sec.getint("temperature_decimals", fallback=default.temperature_decimals)
+    channels = _load_temperature_channels(parser)
+
+    if not channels:
+        channels = [
+            TemperatureChannelConfig(
+                name="Transformador",
+                register=legacy_register,
+                decimals=legacy_decimals,
+                enabled=True,
+            )
+        ]
+
     return TemperatureModbusSettings(
         port=sec.get("port", fallback=default.port),
         slave_address=sec.getint("slave_address", fallback=default.slave_address),
@@ -176,14 +252,9 @@ def load_temperature_modbus_settings(
             "reconnect_delay_seconds",
             fallback=default.reconnect_delay_seconds,
         ),
-        temperature_register=sec.getint(
-            "temperature_register",
-            fallback=default.temperature_register,
-        ),
-        temperature_decimals=sec.getint(
-            "temperature_decimals",
-            fallback=default.temperature_decimals,
-        ),
+        temperature_register=legacy_register,
+        temperature_decimals=legacy_decimals,
+        channels=channels,
     )
 
 

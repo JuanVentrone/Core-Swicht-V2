@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 
 import minimalmodbus
 
-from app.config import TemperatureModbusSettings
+from app.config import TemperatureChannelConfig, TemperatureModbusSettings
 from app.devices.base import BaseDevice
 
 logger = logging.getLogger("farm-control")
@@ -17,8 +17,10 @@ logger = logging.getLogger("farm-control")
 @dataclass
 class TemperatureSnapshot:
     temperature_c: float | None
-    timestamp: str
-    source: str
+    ambient_temperature_c: float | None = None
+    channels: dict[str, float] | None = None
+    timestamp: str = ""
+    source: str = ""
 
 
 class TemperatureSensorDevice(BaseDevice):
@@ -79,13 +81,53 @@ class TemperatureSensorDevice(BaseDevice):
 
     def _read_register(self, register: int, decimals: int) -> float:
         instrument = self._ensure_instrument()
-        return float(instrument.read_register(register, decimals, functioncode=3))
+        return float(instrument.read_register(register, decimals, functioncode=3, signed=True))
+
+    def _get_channel_values(self) -> dict[str, float]:
+        values: dict[str, float] = {}
+        channels = self.settings.channels or []
+        for channel in channels:
+            if not channel.enabled:
+                continue
+            raw_value = self._read_register(channel.register, channel.decimals)
+            values[channel.name] = raw_value
+        return values
 
     def _read_snapshot(self) -> TemperatureSnapshot:
-        register = self.settings.temperature_register
-        value = self._read_register(register, self.settings.temperature_decimals)
+        channel_values = self._get_channel_values()
+        primary_name = None
+        primary_value = None
+
+        if self.settings.channels:
+            for channel in self.settings.channels:
+                if channel.enabled:
+                    primary_name = channel.name
+                    primary_value = channel_values.get(channel.name)
+                    break
+
+        if primary_value is None and channel_values:
+            primary_name, primary_value = next(iter(channel_values.items()))
+
+        ambient_value = None
+        for name, value in channel_values.items():
+            if "ambiente" in name.lower() or name.lower() == "ambiente":
+                ambient_value = value
+                break
+
+        if ambient_value is None:
+            second_channel = None
+            if self.settings.channels:
+                for channel in self.settings.channels:
+                    if channel.enabled and channel.name.lower() != (primary_name or "").lower():
+                        second_channel = channel
+                        break
+            if second_channel is not None:
+                ambient_value = channel_values.get(second_channel.name)
+
         return TemperatureSnapshot(
-            temperature_c=value,
+            temperature_c=primary_value,
+            ambient_temperature_c=ambient_value,
+            channels=channel_values,
             timestamp=datetime.now(timezone.utc).isoformat(),
             source="modbus_rtu_rs485_temperature",
         )

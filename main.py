@@ -161,11 +161,13 @@ def switch_luces(payload: SwitchRequest) -> dict:
 @app.get("/status/general")
 def status_general() -> dict:
     status = controller.General_Status()
-    snapshot = multimeter_device.last_snapshot
+    snapshot = temperature_sensor_device.last_snapshot
     return {
         "contactors": status,
         "temperature": {
             "temperature_c": snapshot.temperature_c if snapshot is not None else None,
+            "ambient_temperature_c": snapshot.ambient_temperature_c if snapshot is not None else None,
+            "channels": snapshot.channels if snapshot is not None else None,
             "source": snapshot.source if snapshot is not None else None,
             "timestamp": snapshot.timestamp if snapshot is not None else None,
         },
@@ -176,20 +178,47 @@ def status_general() -> dict:
 
 @app.get("/metrics/temperature", response_model=TemperatureMetricsResponse)
 def temperature_metrics() -> TemperatureMetricsResponse:
-    snapshot = multimeter_device.last_snapshot
+    snapshot = temperature_sensor_device.last_snapshot
     if snapshot is None:
         return {
             "success": False,
             "status": "Offline",
             "data": None,
-            "error": multimeter_device.last_error or "No multimeter data available yet",
+            "error": temperature_sensor_device.last_error or "No temperature data available yet",
             "shutdown_reason": controller.shutdown_reason,
         }
     return {
         "success": True,
-        "status": multimeter_device.health.value,
+        "status": temperature_sensor_device.health.value,
         "data": {
             "temperature_c": snapshot.temperature_c,
+            "ambient_temperature_c": snapshot.ambient_temperature_c,
+            "channels": snapshot.channels,
+            "timestamp": snapshot.timestamp,
+            "source": snapshot.source,
+        },
+        "error": None,
+        "shutdown_reason": controller.shutdown_reason,
+    }
+
+
+@app.get("/metrics/temperature/ambient")
+def temperature_ambient_metrics() -> dict:
+    snapshot = temperature_sensor_device.last_snapshot
+    if snapshot is None:
+        return {
+            "success": False,
+            "status": "Offline",
+            "data": None,
+            "error": temperature_sensor_device.last_error or "No temperature data available yet",
+            "shutdown_reason": controller.shutdown_reason,
+        }
+    return {
+        "success": True,
+        "status": temperature_sensor_device.health.value,
+        "data": {
+            "ambient_temperature_c": snapshot.ambient_temperature_c,
+            "channels": snapshot.channels,
             "timestamp": snapshot.timestamp,
             "source": snapshot.source,
         },
