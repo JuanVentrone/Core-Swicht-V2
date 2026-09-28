@@ -11,6 +11,7 @@ from app.event_logger import log_system_event
 from app.services import FarmController
 
 logger = logging.getLogger("farm-control")
+AUTO_START_DISABLED_LOG_INTERVAL_SECONDS = 3 * 60 * 60
 
 
 class VoltageProtectionMonitor:
@@ -37,6 +38,7 @@ class VoltageProtectionMonitor:
         self._temperature_tripped = False
         self._stable_since: float | None = None
         self._last_trip_reason: str | None = None
+        self._last_auto_start_disabled_log_at: float | None = None
 
     def run_startup_gate(self) -> None:
         """Tras iniciar solo el medidor: exige primer snapshot; si voltaje fuera de rango → apagado."""
@@ -181,15 +183,22 @@ class VoltageProtectionMonitor:
 
         if not self._settings.auto_start_enabled:
             self._stable_since = None
-            log_system_event(
-                "INFO",
-                reason="AUTO_START_DISABLED",
-                details={
-                    "auto_start_min_volts": self._settings.auto_start_min_volts,
-                    "auto_start_max_volts": self._settings.auto_start_max_volts,
-                    "voltage": {"L1": snapshot.v_l1, "L2": snapshot.v_l2, "L3": snapshot.v_l3},
-                },
-            )
+            now = time.monotonic()
+            if (
+                self._last_auto_start_disabled_log_at is None
+                or now - self._last_auto_start_disabled_log_at
+                >= AUTO_START_DISABLED_LOG_INTERVAL_SECONDS
+            ):
+                log_system_event(
+                    "INFO",
+                    reason="AUTO_START_DISABLED",
+                    details={
+                        "auto_start_min_volts": self._settings.auto_start_min_volts,
+                        "auto_start_max_volts": self._settings.auto_start_max_volts,
+                        "voltage": {"L1": snapshot.v_l1, "L2": snapshot.v_l2, "L3": snapshot.v_l3},
+                    },
+                )
+                self._last_auto_start_disabled_log_at = now
             return
 
         if not self._all_in_auto_start_band(snapshot):
