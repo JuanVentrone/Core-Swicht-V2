@@ -1,46 +1,129 @@
 # Farm Control API (Tuya 3.4)
 
-API en FastAPI para controlar contactores industriales Tuya con `tinytuya` usando protocolo **3.4**.
+API en FastAPI para controlar contactores industriales Tuya con `tinytuya` usando protocolo **3.4**, con lectura de medidor eléctrico y sensor de temperatura Modbus RTU sobre RS485, protección por voltaje/temperatura, notificaciones móviles y webhook.
+
+> **Documentación técnica para agentes / integradores:** consulta [AGENTS_API_REFERENCE.md](AGENTS_API_REFERENCE.md) para el catálogo completo de endpoints, ejemplos de request/response y variables de entorno.
 
 ## Estructura
 
-- `config/`: archivos `.ini` por contactor (`C1.ini`, `C2.ini`, `C3.ini`)
-- `app/models.py`: clase `Contactor`
-- `app/config_loader.py`: carga de configuración con `ConfigParser`
-- `app/services.py`: lógica de control y estado
+- `config/`: archivos `.ini` por contactor (`C1.ini`, `C2.ini`, `C3.ini`), medidor Modbus, sensor de temperatura y alarmas
+- `app/`: modelos, schemas Pydantic, carga de configuración, lógica de control, dispositivos y protección
 - `main.py`: endpoints FastAPI
+- `tests/`: pruebas del sistema
 
 ## Instalación
 
 ```bash
 python -m venv .venv
-.venv\Scripts\activate
+source .venv/bin/activate   # Linux/Mac
+# .venv\Scripts\activate    # Windows
 pip install -r requirements.txt
 ```
 
 ## Configuración
 
-Edita `config/C1.ini`, `config/C2.ini`, `config/C3.ini` con `id`, `ip` y `key` reales.
+### Contactores principales
 
-El puerto RS485 para el medidor de voltaje y el sensor de temperatura se configura también en `config/config.ini` con secciones separadas:
+Edita `config/C1.ini`, `config/C2.ini`, `config/C3.ini` con `id`, `ip` y `key` reales de cada dispositivo Tuya:
 
-- `[MODBUS_VOLTAGE]` para el medidor de voltaje / potencia
-- `[MODBUS_TEMPERATURE]` para el sensor de temperatura independiente
+```ini
+[DEVICE]
+name = Contactor 1
+id   = tu-device-id
+ip   = 192.168.1.101
+key  = tu-local-key
+version = 3.4
+```
 
-Esto facilita cambiar cada ruta sin tocar el código.
+### Medidor de voltaje / potencia (RS485 Modbus)
 
-## Ejecutar API
+Configura `config/modbus_voltage.ini`:
+
+```ini
+[MODBUS_VOLTAGE]
+port = /dev/ttyUSB0
+slave_address = 1
+baudrate = 9600
+poll_interval_seconds = 1.0
+```
+
+### Sensor de temperatura (RS485 Modbus)
+
+Configura `config/modbus_temperature.ini`:
+
+```ini
+[MODBUS_TEMPERATURE]
+port = /dev/ttyUSB1
+slave_address = 1
+baudrate = 9600
+poll_interval_seconds = 2.0
+
+[CHANNEL_1]
+name = Transformador - 1
+register = 0
+decimals = 1
+enabled = true
+
+[CHANNEL_2]
+name = Ambiente
+register = 1
+decimals = 1
+enabled = true
+```
+
+### Protección por voltaje y temperatura
+
+Edita `config/config.ini`:
+
+```ini
+[VOLTAGE_PROTECTION]
+enabled = true
+min_volts = 215
+max_volts = 263
+auto_start_enabled = true
+auto_start_min_volts = 218
+auto_start_max_volts = 260
+auto_start_stable_seconds = 180
+
+[TEMPERATURE_PROTECTION]
+enabled = true
+max_temperature_c = 80
+```
+
+### Variables de entorno (opcional)
+
+```bash
+# Notificaciones (ntfy o Telegram)
+export NTFY_TOPIC="pain-farm-tugranja"
+export TELEGRAM_BOT_TOKEN="123456:ABC..."
+export TELEGRAM_CHAT_ID="123456789"
+
+# Webhook opcional
+export WEBHOOK_URL="https://tu-destino/webhook"
+export WEBHOOK_TOKEN="token-opcional"
+```
+
+## Ejecutar la API
 
 ```bash
 uvicorn main:app --host 0.0.0.0 --port 8000
 ```
 
-## Endpoints
+## Endpoints principales
 
-- `GET /health`
-- `GET /metrics/power` (lectura RS485 en segundo plano cada 1 segundo)
-- `GET /metrics/temperature` (temperatura Modbus)
-- `POST /switch/general` con body JSON:
+- `GET /health` – estado básico de la API
+- `GET /heartbeat` – uptime, estado RS485 y razones de apagado
+- `GET /devices/status` – estado de salud de cada dispositivo
+- `GET /metrics/power` – medidor eléctrico (lectura en segundo plano)
+- `GET /metrics/temperature` – temperatura del sensor Modbus
+- `GET /metrics/temperature/ambient` – temperatura ambiente
+- `GET /status/general` – contactores + temperatura + protección
+- `POST /switch/general` – encendido/apagado general con secuencia automática
+- `POST /switch/C1`, `POST /switch/C2`, `POST /switch/C3`
+- `POST /switch/bocina`
+- `POST /switch/luces`
+
+Body para cualquier `POST /switch/*`:
 
 ```json
 {
@@ -48,90 +131,7 @@ uvicorn main:app --host 0.0.0.0 --port 8000
 }
 ```
 
-- `GET /status/general`
-- `POST /switch/C1`
-- `POST /switch/C2`
-- `POST /switch/C3`
-- `POST /switch/bocina`
-- `POST /switch/luces`
-
-Respuesta de `GET /metrics/power` (si hay datos):
-
-```json
-{
-  "success": true,
-  "status": "Online",
-  "data": {
-    "v_l1": 231.1,
-    "v_l2": 230.9,
-    "v_l3": 231.4,
-    "a_l1": 10.2,
-    "a_l2": 9.8,
-    "a_l3": 10.0,
-    "potencia_kw": 6.3,
-    "factor_potencia": 95.0,
-    "frecuencia": 60.0,
-    "timestamp": "2026-04-28T03:21:11.123456+00:00",
-    "source": "modbus_rtu_rs485"
-  },
-  "error": null
-}
-```
-
-## Notificaciones al celular (contactores)
-
-Cuando **C1, C2 o C3** cambian de estado (desde el panel Pain Farm, la API o el encendido secuencial), la API puede enviar un aviso al móvil.
-
-### Opción A — ntfy (recomendada, app gratuita)
-
-1. Instala **[ntfy](https://ntfy.sh/)** en iOS o Android.
-2. En la app, suscríbete a un tema privado, por ejemplo `pain-farm-tugranja` (elige un nombre difícil de adivinar).
-3. En el servidor donde corre Core Swicht:
-
-```bash
-export NTFY_TOPIC="pain-farm-tugranja"
-# Servidor público por defecto; o tu instancia propia:
-# export NTFY_SERVER="https://ntfy.sh"
-```
-
-4. Reinicia la API (`systemctl --user restart core-swicht` o `uvicorn`).
-
-Cada conmutación envía título y mensaje, por ejemplo: `Contactor C1 · ENCENDIDO`.
-
-### Opción B — Telegram
-
-1. Crea un bot con [@BotFather](https://t.me/BotFather) y copia el **token**.
-2. Obtén tu **chat_id** (mensaje al bot + `https://api.telegram.org/bot<TOKEN>/getUpdates`).
-3. Variables:
-
-```bash
-export TELEGRAM_BOT_TOKEN="123456:ABC..."
-export TELEGRAM_CHAT_ID="123456789"
-```
-
-Puedes usar **ntfy y Telegram a la vez**.
-
-Plantilla de variables: `.env.example`.
-
----
-
-## Webhook (plug-and-play)
-
-El webhook es opcional y queda desactivado por defecto.
-
-- Si `WEBHOOK_URL` esta vacia, no se envia nada.
-- Si `WEBHOOK_URL` tiene valor, cada `switch` envia un `POST` JSON en segundo plano.
-- Si defines `WEBHOOK_TOKEN`, se envia en header `X-Webhook-Token`.
-
-Ejemplo (PowerShell):
-
-```powershell
-$env:WEBHOOK_URL="https://tu-destino/webhook"
-$env:WEBHOOK_TOKEN="token-opcional"
-uvicorn main:app --host 0.0.0.0 --port 8000
-```
-
-## Comportamiento principal
+## Comportamiento del encendido/apagado general
 
 - `estado=true`:
   - enciende `C1` inmediato
@@ -141,13 +141,51 @@ uvicorn main:app --host 0.0.0.0 --port 8000
   - enciende `C3`
   - se ejecuta en segundo plano (thread) para no bloquear la API
 
-## Protección por temperatura
-
-- Si la temperatura medida por RS485 excede `max_temperature_c`, el sistema apaga `C1`, `C2` y `C3` como prevención.
-- La temperatura se expone en `GET /metrics/temperature` y también se incluye en `GET /status/general`.
-
 - `estado=false`:
   - apaga `C1`, `C2`, `C3` de forma inmediata
+  - marca `manual_shutdown = true` para bloquear el auto-arranque hasta el próximo encendido manual
+
+## Protecciones automáticas
+
+- **Voltaje fuera de rango**: si alguna de L1, L2, L3 sale de `[min_volts, max_volts]`, se apaga todo.
+- **Auto-arranque**: si las tres fases permanecen en `[auto_start_min_volts, auto_start_max_volts]` durante `auto_start_stable_seconds`, se inicia el encendido secuencial automáticamente (salvo que haya un apagado manual previo).
+- **Temperatura alta**: si `temperature_c` supera `max_temperature_c`, se apaga todo.
+- **Arranque seguro**: al iniciar la API, si no hay datos Modbus a tiempo o las condiciones son críticas, se apagan los contactores.
+
+## Webhook (plug-and-play)
+
+Cada conmutación de contactor (`C1`, `C2`, `C3`, `bocina`, `luces`) envía un `POST` JSON en segundo plano a `WEBHOOK_URL` cuando está configurado. Incluye header `X-Webhook-Token` si se define `WEBHOOK_TOKEN`.
+
+## Notificaciones al celular
+
+Cuando **C1, C2 o C3** cambian de estado, la API puede enviar un aviso al móvil vía ntfy, Telegram o ambos.
+
+### Opción A — ntfy (recomendada, app gratuita)
+
+1. Instala **[ntfy](https://ntfy.sh/)** en iOS o Android.
+2. Suscríbete a un tema privado, por ejemplo `pain-farm-tugranja`.
+3. En el servidor:
+
+```bash
+export NTFY_TOPIC="pain-farm-tugranja"
+# export NTFY_SERVER="https://ntfy.sh"  # servidor público por defecto
+```
+
+### Opción B — Telegram
+
+1. Crea un bot con [@BotFather](https://t.me/BotFather) y copia el **token**.
+2. Obtén tu **chat_id**.
+3. En el servidor:
+
+```bash
+export TELEGRAM_BOT_TOKEN="123456:ABC..."
+export TELEGRAM_CHAT_ID="123456789"
+```
+
+## Documentación extendida
+
+- [AGENTS_API_REFERENCE.md](AGENTS_API_REFERENCE.md) – referencia completa de endpoints para otros agentes e integradores.
+- [ANALISIS_TEMPERATURA.md](ANALISIS_TEMPERATURA.md) – análisis del subsistema de temperatura.
 
 ## Nota técnica
 

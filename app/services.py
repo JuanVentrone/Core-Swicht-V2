@@ -10,6 +10,7 @@ from urllib import error, request
 
 import tinytuya
 
+from app.event_logger import log_system_event
 from app.models import Contactor
 from app.notifications import NotificationSettings, load_notification_settings, notify_contactor_change
 
@@ -198,6 +199,11 @@ class FarmController:
             self._clear_manual_shutdown()
             with self._thread_lock:
                 if self._switch_thread and self._switch_thread.is_alive():
+                    log_system_event(
+                        "ON",
+                        reason="SEQUENTIAL_ON_ALREADY_RUNNING",
+                        details={"manual": manual, "state": "ON", "status": "rejected"},
+                    )
                     return {
                         "accepted": False,
                         "message": "Sequential ON routine is already running",
@@ -209,6 +215,11 @@ class FarmController:
                     name="sequential-on-thread",
                 )
                 self._switch_thread.start()
+            log_system_event(
+                "ON",
+                reason=(reason or "SEQUENTIAL_START"),
+                details={"manual": manual, "state": "ON", "contactors": ["C1", "C2", "C3"]},
+            )
             return {
                 "accepted": True,
                 "message": "Sequential ON routine started in background",
@@ -228,6 +239,17 @@ class FarmController:
                 results[key] = {"success": False, "error": "Not configured"}
                 continue
             results[key] = self.ctr_contactor(contactor, False)
+
+        log_system_event(
+            "OFF",
+            reason=shutdown_reason or "UNKNOWN_OFF_REASON",
+            details={
+                "manual": manual,
+                "state": "OFF",
+                "contactors": list(results.keys()),
+                "results": results,
+            },
+        )
         return {
             "accepted": True,
             "message": "Immediate OFF executed",

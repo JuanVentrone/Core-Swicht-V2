@@ -7,6 +7,7 @@ import time
 from app.config import TemperatureProtectionSettings, VoltageProtectionSettings
 from app.devices.industrial_multimeter import IndustrialMultimeterDevice, MultimeterSnapshot
 from app.devices.temperature_sensor import TemperatureSensorDevice
+from app.event_logger import log_system_event
 from app.services import FarmController
 
 logger = logging.getLogger("farm-control")
@@ -180,6 +181,15 @@ class VoltageProtectionMonitor:
 
         if not self._settings.auto_start_enabled:
             self._stable_since = None
+            log_system_event(
+                "INFO",
+                reason="AUTO_START_DISABLED",
+                details={
+                    "auto_start_min_volts": self._settings.auto_start_min_volts,
+                    "auto_start_max_volts": self._settings.auto_start_max_volts,
+                    "voltage": {"L1": snapshot.v_l1, "L2": snapshot.v_l2, "L3": snapshot.v_l3},
+                },
+            )
             return
 
         if not self._all_in_auto_start_band(snapshot):
@@ -208,6 +218,20 @@ class VoltageProtectionMonitor:
                 snapshot.v_l1,
                 snapshot.v_l2,
                 snapshot.v_l3,
+            )
+            log_system_event(
+                "ON",
+                reason="AUTO_START_STABLE_VOLTAGE",
+                details={
+                    "stable_seconds": round(elapsed, 2),
+                    "voltage_band": {
+                        "min_volts": self._settings.auto_start_min_volts,
+                        "max_volts": self._settings.auto_start_max_volts,
+                    },
+                    "L1": snapshot.v_l1,
+                    "L2": snapshot.v_l2,
+                    "L3": snapshot.v_l3,
+                },
             )
         elif "already running" in msg:
             self._stable_since = time.monotonic()
@@ -267,6 +291,18 @@ class VoltageProtectionMonitor:
                         voltage_snapshot.v_l2,
                         voltage_snapshot.v_l3,
                     )
+                    reason = "LOW_VOLTAGE" if voltage_snapshot.v_l1 < self._settings.min_volts or voltage_snapshot.v_l2 < self._settings.min_volts or voltage_snapshot.v_l3 < self._settings.min_volts else "HIGH_VOLTAGE"
+                    log_system_event(
+                        "OFF",
+                        reason=reason,
+                        details={
+                            "fault_lines": fault_lines,
+                            "allowed_range": {"min_volts": self._settings.min_volts, "max_volts": self._settings.max_volts},
+                            "L1": voltage_snapshot.v_l1,
+                            "L2": voltage_snapshot.v_l2,
+                            "L3": voltage_snapshot.v_l3,
+                        },
+                    )
                     result = self._controller.General_Switch_System(False)
                     logger.warning("Protección voltaje: apagado ejecutado: %s", result)
                     self._tripped = True
@@ -284,6 +320,15 @@ class VoltageProtectionMonitor:
                 self._last_trip_reason = f"Temperature out of range: {temperature:.1f} °C"
                 if not self._temperature_tripped:
                     self._log_temperature_trip(temperature)
+                    log_system_event(
+                        "OFF",
+                        reason="HIGH_TEMPERATURE_TRANSFORMER",
+                        details={
+                            "temperature_c": temperature,
+                            "max_temperature_c": self._temperature_settings.max_temperature_c,
+                            "source": "transformer",
+                        },
+                    )
                     result = self._controller.General_Switch_System(False)
                     logger.warning("Protección temperatura: apagado ejecutado: %s", result)
                     self._temperature_tripped = True
@@ -301,10 +346,28 @@ class VoltageProtectionMonitor:
                         voltage_snapshot.v_l2,
                         voltage_snapshot.v_l3,
                     )
+                    log_system_event(
+                        "ON",
+                        reason="VOLTAGE_RECOVERED",
+                        details={
+                            "L1": voltage_snapshot.v_l1,
+                            "L2": voltage_snapshot.v_l2,
+                            "L3": voltage_snapshot.v_l3,
+                            "allowed_range": {"min_volts": self._settings.min_volts, "max_volts": self._settings.max_volts},
+                        },
+                    )
                 if self._temperature_tripped and temperature_snapshot is not None:
                     logger.info(
                         "Temperatura normalizada (%.1f °C); listo para vigilancia",
                         temperature_snapshot.temperature_c,
+                    )
+                    log_system_event(
+                        "ON",
+                        reason="TEMPERATURE_RECOVERED",
+                        details={
+                            "temperature_c": temperature_snapshot.temperature_c,
+                            "max_temperature_c": self._temperature_settings.max_temperature_c,
+                        },
                     )
                 self._tripped = False
                 self._temperature_tripped = False

@@ -68,7 +68,7 @@ def load_voltage_protection_settings(
         max_volts=253.0,
         check_interval_seconds=2.0,
         startup_read_timeout_seconds=90.0,
-        auto_start_enabled=True,
+        auto_start_enabled=False,
         auto_start_min_volts=220.0,
         auto_start_max_volts=245.0,
         auto_start_stable_seconds=180.0,
