@@ -7,7 +7,7 @@ from app.voltage_protection import VoltageProtectionMonitor
 
 
 class VoltageProtectionTests(unittest.TestCase):
-    def test_auto_start_disabled_event_is_logged_every_three_hours(self):
+    def test_auto_start_disabled_does_not_log_system_event(self):
         settings = VoltageProtectionSettings(
             enabled=True,
             min_volts=218.0,
@@ -33,18 +33,11 @@ class VoltageProtectionTests(unittest.TestCase):
         )
         snapshot = SimpleNamespace(v_l1=227.8, v_l2=225.8, v_l3=224.4)
 
-        with (
-            patch(
-                "app.voltage_protection.time.monotonic",
-                side_effect=[100.0, 200.0, 10899.0, 10900.0],
-            ),
-            patch("app.voltage_protection.log_system_event") as log_event,
-        ):
+        with patch("app.voltage_protection.log_system_event") as log_event:
             for _ in range(4):
                 monitor._maybe_auto_start(snapshot)
 
-        self.assertEqual(log_event.call_count, 2)
-        self.assertEqual(log_event.call_args.kwargs["reason"], "AUTO_START_DISABLED")
+        log_event.assert_not_called()
 
 
 if __name__ == "__main__":
