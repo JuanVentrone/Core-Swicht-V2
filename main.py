@@ -122,7 +122,7 @@ def power_metrics() -> PowerMetricsResponse:
 
 @app.post("/switch/general")
 def switch_general(payload: SwitchRequest) -> dict:
-    return controller.General_Switch_System(payload.estado, manual=not payload.estado)
+    return controller.General_Switch_System(payload.estado, manual=True)
 
 
 @app.post("/switch/C1")

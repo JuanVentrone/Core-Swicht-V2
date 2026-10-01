@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import logging
 import threading
-import time
 from dataclasses import asdict
 from datetime import datetime, timezone
 from urllib import error, request
@@ -33,6 +32,7 @@ class FarmController:
         )
         self._thread_lock = threading.Lock()
         self._switch_thread: threading.Thread | None = None
+        self._switch_cancel = threading.Event()
         self._manual_shutdown = False
         self._shutdown_reason: str | None = None
 
@@ -104,6 +104,17 @@ class FarmController:
         ).start()
 
     def ctr_contactor(self, contactor_obj: Contactor, estado: bool) -> dict:
+        with self._thread_lock:
+            if estado and self._manual_shutdown:
+                return {
+                    "success": False,
+                    "name": contactor_obj.name,
+                    "requested_state": True,
+                    "error": "Manual shutdown is active; a manual general ON is required",
+                }
+            return self._perform_contactor_switch(contactor_obj, estado)
+
+    def _perform_contactor_switch(self, contactor_obj: Contactor, estado: bool) -> dict:
         device = None
         result: dict | None = None
         contactor_key = self._get_contactor_key(contactor_obj)
@@ -140,8 +151,6 @@ class FarmController:
                 "requested_state": estado,
                 "device_response": response,
             }
-            if estado and result["success"]:
-                self._clear_manual_shutdown()
             return result
         except Exception as exc:  # broad by design for network/device errors
             logger.exception("Error switching contactor %s: %s", contactor_obj.name, exc)
@@ -178,15 +187,26 @@ class FarmController:
     def _run_sequential_on(self) -> None:
         ordered_keys = ("C1", "C2", "C3")
         for idx, key in enumerate(ordered_keys):
+            if self._switch_cancel.is_set():
+                logger.info("Sequential ON routine cancelled")
+                return
+
             contactor = self.contactors.get(key)
             if contactor is None:
                 logger.warning("Contactor %s not found in config", key)
                 continue
 
-            self.ctr_contactor(contactor, True)
+            with self._thread_lock:
+                if self._switch_cancel.is_set() or self._manual_shutdown:
+                    logger.info("Sequential ON routine cancelled by shutdown lock")
+                    return
+                self._perform_contactor_switch(contactor, True)
+
             if idx < len(ordered_keys) - 1:
                 logger.info("Waiting 180 seconds before next contactor")
-                time.sleep(180)
+                if self._switch_cancel.wait(180):
+                    logger.info("Sequential ON routine cancelled during delay")
+                    return
         logger.info("Sequential ON routine finished")
 
     def General_Switch_System(
@@ -196,7 +216,6 @@ class FarmController:
         reason: str | None = None,
     ) -> dict:
         if estado:
-            self._clear_manual_shutdown()
             with self._thread_lock:
                 if self._switch_thread and self._switch_thread.is_alive():
                     log_system_event(
@@ -209,6 +228,20 @@ class FarmController:
                         "message": "Sequential ON routine is already running",
                     }
 
+                if self._manual_shutdown and not manual:
+                    log_system_event(
+                        "ON",
+                        reason="MANUAL_SHUTDOWN_LOCK",
+                        details={"manual": False, "state": "ON", "status": "rejected"},
+                    )
+                    return {
+                        "accepted": False,
+                        "message": "Manual shutdown is active; a manual general ON is required",
+                    }
+
+                if manual:
+                    self._clear_manual_shutdown()
+                self._switch_cancel.clear()
                 self._switch_thread = threading.Thread(
                     target=self._run_sequential_on,
                     daemon=True,
@@ -226,10 +259,12 @@ class FarmController:
                 "manual_shutdown_cleared": True,
             }
 
-        if manual:
-            self._set_manual_shutdown(reason or "Manual general shutdown")
-        else:
-            self._shutdown_reason = reason or "General OFF executed by controller"
+        with self._thread_lock:
+            self._switch_cancel.set()
+            if manual:
+                self._set_manual_shutdown(reason or "Manual general shutdown")
+            else:
+                self._shutdown_reason = reason or "General OFF executed by controller"
         shutdown_reason = self._shutdown_reason
 
         results = {}
